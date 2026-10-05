@@ -67,6 +67,10 @@ main{padding:40px 24px 120px;display:flex;justify-content:center}
 .field input:focus{border-color:var(--soft)}
 .field textarea{min-height:56px;background-image:linear-gradient(var(--rule) 1px,transparent 1px);background-size:100% 1.85em;background-position:0 calc(1.85em - 1px)}
 .verse textarea{font-size:19px;color:var(--accent)}
+.verse-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:4px}
+.verse-row input{flex:1}
+.shuffle{font-size:12px;color:var(--soft);border:1px solid var(--rule);border-radius:999px;padding:3px 11px;white-space:nowrap}
+.shuffle:hover{color:var(--ink);border-color:var(--soft)}
 ::placeholder{color:var(--faint);opacity:1}
 
 .prayers{display:flex;flex-direction:column}
@@ -138,8 +142,11 @@ dialog .close{color:var(--soft);font-size:13px}
 
       <div class="field verse">
         <label>오늘의 말씀</label>
-        <textarea data-k="verse" rows="1" placeholder="“여호와는 나의 목자시니 내게 부족함이 없으리로다”"></textarea>
-        <input data-k="ref" placeholder="시편 23:1" style="font-size:14px;font-family:var(--sans);color:var(--soft);margin-top:4px">
+        <textarea data-k="verse" rows="1" placeholder="말씀을 불러오는 중…"></textarea>
+        <div class="verse-row">
+          <input data-k="ref" placeholder="" style="font-size:14px;font-family:var(--sans);color:var(--soft)">
+          <button class="shuffle" id="shuffle">다른 말씀</button>
+        </div>
       </div>
       <div class="field">
         <label>묵상 <span>말씀이 내게 하시는 이야기</span></label>
@@ -192,14 +199,14 @@ if (!db.entries) db.entries = {};
 let cur = today();
 let q = '';
 
-const isEmpty = e => !e || (!e.verse && !e.ref && !e.meditation && !e.thanks && !e.apply && !(e.prayers||[]).some(p => p.text));
+const isEmpty = e => !e || ((e.verseAuto || (!e.verse && !e.ref)) && !e.meditation && !e.thanks && !e.apply && !(e.prayers||[]).some(p => p.text));
 
 // ---- 저장 ----
 const status = $('#status');
 function setStatus(state, text){ status.className = 'status ' + state; status.querySelector('span').textContent = text; }
 
 function persist(){
-  for (const k of Object.keys(db.entries)) if (k !== cur && isEmpty(db.entries[k])) delete db.entries[k];
+  for (const k of Object.keys(db.entries)) if (k !== cur && !db.entries[k].verse && isEmpty(db.entries[k])) delete db.entries[k];
   db.updatedAt = Date.now();
   const json = JSON.stringify(db);
   const ok = safeSet(KEY, json);
@@ -232,7 +239,7 @@ const entry = () => db.entries[cur] || (db.entries[cur] = { verse:'', ref:'', me
 
 function autoGrow(t){ t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }
 document.querySelectorAll('[data-k]').forEach(el => {
-  el.addEventListener('input', () => { entry()[el.dataset.k] = el.value; if (el.tagName==='TEXTAREA') autoGrow(el); saveSoon(); });
+  el.addEventListener('input', () => { entry()[el.dataset.k] = el.value; if (el.dataset.k==='verse'||el.dataset.k==='ref') entry().verseAuto = false; if (el.tagName==='TEXTAREA') autoGrow(el); saveSoon(); });
 });
 
 function renderPrayers(){
@@ -266,6 +273,7 @@ function load(date){
   const e = db.entries[cur] || {};
   document.querySelectorAll('[data-k]').forEach(el => { el.value = e[el.dataset.k] || ''; if (el.tagName==='TEXTAREA') autoGrow(el); });
   renderPrayers();
+  if (!e.verse && !e.ref) fillVerse(cur, false);
   const d = new Date(cur + 'T00:00:00');
   $('#title').innerHTML = `${d.getMonth()+1}월 ${d.getDate()}일<span class="weekday"> ${WD[d.getDay()]}요일${cur===today()?' · 오늘':''}</span>`;
   $('#datePick').value = cur;
@@ -278,6 +286,34 @@ const openPicker = () => { const p = $('#datePick'); p.showPicker ? p.showPicker
 $('#title').onclick = openPicker;
 $('#title').onkeydown = e => { if (e.key==='Enter') openPicker(); };
 $('#datePick').onchange = e => e.target.value && load(e.target.value);
+
+// ---- 오늘의 말씀 (개역한글 전체 31,103구절 중 무작위) ----
+let bibleIdx = null; const bookCache = {};
+async function getIdx(){ return bibleIdx || (bibleIdx = await fetch('bible/index.json').then(r => r.json())); }
+async function getBook(i){ return bookCache[i] || (bookCache[i] = await fetch(`bible/${i}.json`).then(r => r.json())); }
+function seeded(str){ let h = 2166136261; for (const c of str){ h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995); h ^= h >>> 15; return (h >>> 0) / 4294967296; }
+async function fillVerse(date, random){
+  try {
+    const idx = await getIdx();
+    const total = idx.reduce((a, [, ch]) => a + ch.reduce((x, y) => x + y, 0), 0);
+    let n = Math.floor((random ? Math.random() : seeded(date)) * total);
+    let b = 0, c = 0;
+    outer: for (; b < idx.length; b++) for (c = 0; c < idx[b][1].length; c++) { if (n < idx[b][1][c]) break outer; n -= idx[b][1][c]; }
+    const text = (await getBook(b))[c][n];
+    if (date !== cur) return;
+    const e = entry();
+    if (!random && (e.verse || e.ref)) return;            // 직접 쓴 말씀은 절대 덮어쓰지 않음
+    e.verse = text; e.ref = `${idx[b][0]} ${c+1}:${n+1}`; e.verseAuto = true;
+    const vt = document.querySelector('[data-k=verse]'); vt.value = e.verse; autoGrow(vt);
+    document.querySelector('[data-k=ref]').value = e.ref;
+    saveSoon();
+  } catch { document.querySelector('[data-k=verse]').placeholder = '말씀을 불러오지 못했어요. 직접 적어도 됩니다.'; }
+}
+$('#shuffle').onclick = () => {
+  const e = db.entries[cur];
+  if (e && e.verse && !e.verseAuto && !confirm('직접 적은 말씀을 다른 말씀으로 바꿀까요?')) return;
+  fillVerse(cur, true);
+};
 
 // ---- 목록 ----
 function renderList(){
