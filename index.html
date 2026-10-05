@@ -331,7 +331,7 @@ function renderList(){
     const e = db.entries[k] || {};
     const d = new Date(k + 'T00:00:00');
     const b = document.createElement('button'); if (k===cur) b.className = 'on';
-    const head = e.ref || (e.verse||'').split('\n')[0] || (e.meditation||'').split('\n')[0] || '새 일기';
+    const head = (e.meditation||'').split('\n').find(l => l.trim()) || '아직 묵상 전';
     b.innerHTML = `<div class="d">${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()} (${WD[d.getDay()]})</div><div class="t"></div>`;
     b.querySelector('.t').textContent = head;
     b.onclick = () => { load(k); $('#side').classList.remove('open'); };
